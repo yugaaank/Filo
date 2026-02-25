@@ -335,7 +335,8 @@ async def batch_move(path: str = Form(...), item_names: str = Form(...), dest_pa
 
 @app.get("/delete/{filepath:path}")
 async def delete_file(filepath: str):
-    file_path = Path("/" + filepath.lstrip("/")).resolve()
+    decoded_path = unquote(filepath)
+    file_path = Path("/" + decoded_path.lstrip("/")).resolve()
     if not file_path.exists():
         raise HTTPException(status_code=404)
     
