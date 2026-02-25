@@ -21,6 +21,51 @@ SERVER_DIR = Path(__file__).parent.resolve()
 
 templates = Jinja2Templates(directory=str(SERVER_DIR / "templates"))
 
+TRASH_DIR = Path.home() / ".liquid_commander_trash"
+TRASH_DIR.mkdir(parents=True, exist_ok=True)
+
+PROTECTED_PATHS = {
+    BASE_DIR,
+    SERVER_DIR,
+    SERVER_DIR / "server.py",
+    SERVER_DIR / "templates",
+    TRASH_DIR
+}
+
+def ensure_trash_dir():
+    TRASH_DIR.mkdir(parents=True, exist_ok=True)
+
+def is_protected_path(path: Path):
+    try:
+        resolved = path.resolve()
+    except Exception:
+        return False
+    return resolved in PROTECTED_PATHS
+
+def is_in_trash(path: Path):
+    try:
+        resolved = path.resolve()
+    except Exception:
+        return False
+    return resolved == TRASH_DIR or TRASH_DIR in resolved.parents
+
+def move_to_trash(target: Path):
+    ensure_trash_dir()
+    try:
+        resolved = target.resolve()
+    except Exception:
+        return False
+    if not resolved.exists():
+        return False
+
+    dest = TRASH_DIR / resolved.name
+    if dest.exists():
+        suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+        dest = TRASH_DIR / f"{resolved.stem}_{suffix}{resolved.suffix}"
+
+    shutil.move(str(resolved), str(dest))
+    return True
+
 def get_file_info(current_dir: Path, search_query: str = "", show_hidden: bool = False):
     folders = []
     files = []
@@ -129,6 +174,8 @@ async def index(request: Request, path: str = None, search: str = "", mode: str 
         "device_name": device_name,
         "home_path": home_path,
         "root_path": root_path,
+        "trash_path": quote(str(TRASH_DIR)),
+        "trash_path_raw": str(TRASH_DIR),
         "search_query": search,
         "mode": "normal",
         "breadcrumbs": parts,
@@ -292,13 +339,32 @@ async def batch_delete(path: str = Form(...), item_names: str = Form(...)):
     names = item_names.split(',')
     for name in names:
         target = parent_dir / name
+        if not target.exists() or is_protected_path(target):
+            continue
         try:
-            if target.exists():
+            if is_in_trash(target):
                 if target.is_dir():
                     shutil.rmtree(target)
                 else:
                     target.unlink()
-        except Exception as e:
+            else:
+                move_to_trash(target)
+        except Exception:
+            continue
+    return {"status": "success"}
+
+@app.post("/trash/empty")
+async def empty_trash():
+    ensure_trash_dir()
+    for child in list(TRASH_DIR.iterdir()):
+        if is_protected_path(child):
+            continue
+        try:
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+        except Exception:
             continue
     return {"status": "success"}
 
@@ -340,14 +406,18 @@ async def delete_file(filepath: str):
     if not file_path.exists():
         raise HTTPException(status_code=404)
     
-    if file_path == BASE_DIR or file_path == SERVER_DIR or file_path == SERVER_DIR / "server.py" or file_path == SERVER_DIR / "templates":
+    if is_protected_path(file_path):
         raise HTTPException(status_code=403, detail="Cannot delete critical files")
 
     parent_path = str(file_path.parent)
-    if file_path.is_dir():
-        shutil.rmtree(file_path)
+    if is_in_trash(file_path):
+        if file_path.is_dir():
+            shutil.rmtree(file_path)
+        else:
+            file_path.unlink()
     else:
-        file_path.unlink()
+        if not move_to_trash(file_path):
+            raise HTTPException(status_code=400, detail="Failed to move item to Trash")
     return RedirectResponse(url=f"/?path={quote(parent_path)}", status_code=303)
 
 if __name__ == "__main__":

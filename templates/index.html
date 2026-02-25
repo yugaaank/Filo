@@ -63,6 +63,24 @@
         .folder-card, .file-card { width: 110px; height: 95px; position: relative; cursor: pointer; display: flex; align-items: flex-end; transition: transform 0.2s cubic-bezier(0.2, 0, 0.2, 1); }
         .folder-card:hover, .file-card:hover { transform: translateY(-4px); }
         
+        .trash-entry {
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+        .trash-entry .f-front {
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        .trash-entry .f-name {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .trash-entry .f-meta {
+            color: var(--folder-color);
+        }
+        .trash-entry.entry-list {
+            border-left: 2px dashed var(--folder-color);
+        }
+
         .f-back { position: absolute; top: 15%; left: 0; width: 100%; height: 85%; background: var(--folder-color); border-radius: 10px; z-index: 1; box-shadow: 0 4px 15px rgba(0,0,0,0.15); }
         .f-tab { position: absolute; top: 0; left: 0; width: 45%; height: 25%; background: var(--folder-color); border-top-left-radius: 6px; border-top-right-radius: 6px; z-index: 1; }
         .f-front { position: relative; width: 100%; height: 75%; background: var(--glass-front); backdrop-filter: blur(20px) saturate(150%); border: 1px solid var(--border-highlight); border-radius: 10px; z-index: 2; display: flex; flex-direction: column; justify-content: flex-end; padding: 8px; box-shadow: 0 -4px 20px rgba(0,0,0,0.3), 0 6px 20px rgba(0,0,0,0.2); }
@@ -172,6 +190,7 @@
             <div class="sidebar-item" onclick="loadPane('{{ home_path }}/Downloads')"><i data-lucide="download" size="16"></i> Downloads</div>
             <div class="sidebar-item" onclick="loadPane('{{ home_path }}/Pictures')"><i data-lucide="image" size="16"></i> Images</div>
             <div class="sidebar-item" onclick="loadPane('{{ home_path }}/Videos')"><i data-lucide="video" size="16"></i> Videos</div>
+            <div class="sidebar-item" onclick="loadPane('{{ trash_path }}')"><i data-lucide="trash-2" size="16"></i> Trash</div>
         </div>
         <div class="sidebar-section">
             <div class="sidebar-title">System</div>
@@ -222,6 +241,7 @@
             <div class="tool-btn" onclick="showPrompt('file')"><i data-lucide="file-plus" size="16"></i> File</div>
             <div class="tool-btn" onclick="document.getElementById('file-upload').click()"><i data-lucide="upload" size="16"></i> Upload</div>
             <div id="paste-btn" class="tool-btn" style="display: none;" onclick="pasteItem()"><i data-lucide="clipboard" size="16"></i> Paste</div>
+            <div id="empty-trash-btn" class="tool-btn" style="display:none;" onclick="emptyTrash()"><i data-lucide="trash" size="16"></i> Empty Trash</div>
         </div>
     </div>
 
@@ -247,6 +267,7 @@
     <script>
         lucide.createIcons();
         let currentPath = "{{ home_path }}";
+        const TRASH_PATH = {{ trash_path_raw | tojson }};
         let viewMode = 'grid';
         let showHidden = false;
         let clipboard = { action: null, path: null, names: null, name: null, is_dir: false };
@@ -298,6 +319,10 @@
                 const resp = await fetch(`/api/list?path=${encodeURIComponent(path)}&show_hidden=${showHidden}`);
                 const data = await resp.json();
                 currentPath = data.path;
+                const emptyTrashBtn = document.getElementById('empty-trash-btn');
+                if (emptyTrashBtn) {
+                    emptyTrashBtn.style.display = currentPath === TRASH_PATH ? 'flex' : 'none';
+                }
 
                 // Update Disk Info
                 if (data.disk_info) {
@@ -311,6 +336,7 @@
                 ).join(' <i data-lucide="chevron-right" size="10" style="opacity:0.3"></i> ');
 
                 // Combine folders and files
+                const isTrashView = currentPath === TRASH_PATH;
                 let items = [...data.folders.map(f => ({...f, is_dir: true})), ...data.files.map(f => ({...f, is_dir: false}))];
 
                 // Filtering
@@ -326,22 +352,44 @@
                     return 0;
                 });
 
+                if (!isTrashView) {
+                    const trashEntry = { special: 'trash', name: 'Trash', rel_path: TRASH_PATH, is_dir: true };
+                    items = [trashEntry, ...items];
+                }
+
                 const body = document.getElementById(`body-0`);
                 body.className = `pane-body body-${viewMode}`;
                 body.innerHTML = '';
 
                 items.forEach((item, index) => {
+                    const isTrashEntry = item.special === 'trash';
                     const el = document.createElement('div');
-                    el.setAttribute('data-item-name', item.name);
+                    if (!isTrashEntry) {
+                        el.setAttribute('data-item-name', item.name);
+                    }
                     
-                    const cb = document.createElement('input');
-                    cb.type = 'checkbox';
-                    cb.className = 'select-checkbox';
-                    cb.checked = selectedItems.has(item.name);
-                    cb.onclick = (e) => handleToggleSelect(e, item.name, index, items);
+                    let cb = null;
+                    if (!isTrashEntry) {
+                        cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.className = 'select-checkbox';
+                        cb.checked = selectedItems.has(item.name);
+                        cb.onclick = (e) => handleToggleSelect(e, item.name, index, items);
+                    }
 
                     if (viewMode === 'grid') {
-                        if (item.is_dir) {
+                        if (isTrashEntry) {
+                            el.className = 'folder-card trash-entry';
+                            el.onclick = () => loadPane(item.rel_path);
+                            el.innerHTML = `
+                                <div class="f-tab"></div>
+                                <div class="f-back"></div>
+                                <div class="f-front">
+                                    <div class="f-name">Trash</div>
+                                    <div class="f-meta">Safe release</div>
+                                </div>
+                            `;
+                        } else if (item.is_dir) {
                             el.className = 'folder-card' + (selectedItems.has(item.name) ? ' selected-item' : '');
                             el.onclick = () => loadPane(item.rel_path);
                             el.oncontextmenu = (e) => showContextMenu(e, 'folder', item);
@@ -353,16 +401,22 @@
                             el.innerHTML = `<div class="fi-back"></div><div class="fi-front"><div class="fi-icon"><i data-lucide="file" size="18"></i></div><div class="f-name">${item.name}</div><div class="f-meta">${item.size}</div></div>`;
                         }
                     } else {
-                        el.className = 'entry-list' + (selectedItems.has(item.name) ? ' selected-item' : '');
-                        el.onclick = item.is_dir ? () => loadPane(item.rel_path) : () => previewFile(item.rel_path, item.name, item.type);
-                        el.oncontextmenu = (e) => showContextMenu(e, item.is_dir ? 'folder' : 'file', item);
-                        if (item.is_dir) {
-                            el.innerHTML = `<div class="mini-f"><div class="mini-f-front"></div></div><span style="flex:1">${item.name}</span><span style="color:var(--dim); font-size:11px">${item.mtime}</span>`;
+                        if (isTrashEntry) {
+                            el.className = 'entry-list trash-entry';
+                            el.onclick = () => loadPane(item.rel_path);
+                            el.innerHTML = `<i data-lucide="trash-2" size="18" style="opacity:0.5; flex-shrink:0;"></i><span style="flex:1">${item.name}</span><span style="color:var(--dim); font-size:11px;">Open Trash</span>`;
                         } else {
-                            el.innerHTML = `<i data-lucide="file" size="18" style="opacity:0.5; flex-shrink:0;"></i><span style="flex:1">${item.name}</span><span style="color:var(--dim); font-size:11px; margin-right: 12px;">${item.size}</span><span style="color:var(--dim); font-size:11px">${item.mtime}</span>`;
+                            el.className = 'entry-list' + (selectedItems.has(item.name) ? ' selected-item' : '');
+                            el.onclick = item.is_dir ? () => loadPane(item.rel_path) : () => previewFile(item.rel_path, item.name, item.type);
+                            el.oncontextmenu = (e) => showContextMenu(e, item.is_dir ? 'folder' : 'file', item);
+                            if (item.is_dir) {
+                                el.innerHTML = `<div class="mini-f"><div class="mini-f-front"></div></div><span style="flex:1">${item.name}</span><span style="color:var(--dim); font-size:11px">${item.mtime}</span>`;
+                            } else {
+                                el.innerHTML = `<i data-lucide="file" size="18" style="opacity:0.5; flex-shrink:0;"></i><span style="flex:1">${item.name}</span><span style="color:var(--dim); font-size:11px; margin-right: 12px;">${item.size}</span><span style="color:var(--dim); font-size:11px">${item.mtime}</span>`;
+                            }
                         }
                     }
-                    el.appendChild(cb);
+                    if (cb) el.appendChild(cb);
                     body.appendChild(el);
                 });
                 lucide.createIcons();
@@ -378,7 +432,9 @@
                 const start = Math.min(lastSelectedIndex, index);
                 const end = Math.max(lastSelectedIndex, index);
                 for (let i = start; i <= end; i++) {
-                    selectedItems.add(items[i].name);
+                    const entry = items[i];
+                    if (entry.special) continue;
+                    selectedItems.add(entry.name);
                 }
             } else {
                 if (selectedItems.has(name)) {
@@ -444,6 +500,21 @@
                 }
             } catch (e) {
                 console.error(e);
+            }
+        }
+
+        async function emptyTrash() {
+            if (!confirm("Empty Trash permanently?")) return;
+            try {
+                const resp = await fetch('/trash/empty', { method: 'POST' });
+                if (resp.ok) {
+                    loadPane(TRASH_PATH);
+                } else {
+                    alert("Empty trash failed.");
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Request error.");
             }
         }
 
@@ -611,6 +682,29 @@
                 
                 fetch('/rename', { method: 'POST', body: formData })
                     .then(() => loadPane());
+            }
+        }
+
+        async function showPrompt(type) {
+            const label = type === 'folder' ? 'folder' : 'file';
+            const name = prompt(`Enter ${label} name:`);
+            if (!name) return;
+
+            const endpoint = type === 'folder' ? '/create-folder' : '/create-file';
+            const formData = new FormData();
+            formData.append('path', currentPath);
+            formData.append('name', name);
+
+            try {
+                const resp = await fetch(endpoint, { method: 'POST', body: formData });
+                if (resp.ok) {
+                    loadPane();
+                } else {
+                    alert(`Create ${label} failed.`);
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Request error.");
             }
         }
 
