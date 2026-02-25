@@ -1,7 +1,7 @@
 import os
 import shutil
 from pathlib import Path
-from fastapi import FastAPI, Request, UploadFile, File, HTTPException
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Form
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -58,6 +58,7 @@ def get_file_info(current_dir: Path, search_query: str = "", show_hidden: bool =
                     folders.append(info)
                 else:
                     mime_type, _ = mimetypes.guess_type(path)
+                    info["size_bytes"] = stats.st_size
                     info["size"] = f"{stats.st_size / (1024*1024):.2f} MB"
                     info["ext"] = path.suffix.lower().lstrip('.')
                     info["mime"] = mime_type or "application/octet-stream"
@@ -85,44 +86,6 @@ async def index(request: Request, path: str = None, search: str = "", mode: str 
     home_path = quote(str(Path.home()))
     root_path = quote("/")
 
-    if mode == "recents":
-        recents = []
-        try:
-            home = Path.home()
-            scan_paths = [home, home / "Downloads", home / "Documents", home / "Desktop"]
-            for p in scan_paths:
-                if p.exists():
-                    for item in p.iterdir():
-                        if item.is_file() and not item.name.startswith('.'):
-                            stats = item.stat()
-                            recents.append({
-                                "name": item.name,
-                                "safe_path": quote(str(item.resolve())),
-                                "mtime": datetime.fromtimestamp(stats.st_mtime).strftime('%b %d, %Y'),
-                                "size": f"{stats.st_size / (1024*1024):.2f} MB",
-                                "type": "file", 
-                                "is_dir": False,
-                                "raw_mtime": stats.st_mtime
-                            })
-            recents = sorted(recents, key=lambda x: x["raw_mtime"], reverse=True)[:30]
-        except:
-            pass
-        
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "folders": [],
-            "files": recents,
-            "current_name": "Recents",
-            "current_path": "Recents",
-            "safe_current_path": "",
-            "user_name": user_name,
-            "device_name": device_name,
-            "home_path": home_path,
-            "root_path": root_path,
-            "mode": "recents",
-            "breadcrumbs": []
-        })
-
     if path:
         path = unquote(path)
     else:
@@ -135,6 +98,15 @@ async def index(request: Request, path: str = None, search: str = "", mode: str 
         
     if not target_dir.exists():
         return RedirectResponse(url=f"/?path={home_path}")
+
+    # Get disk usage
+    usage = shutil.disk_usage(target_dir)
+    disk_info = {
+        "total": f"{usage.total / (1024**3):.1f} GB",
+        "used": f"{usage.used / (1024**3):.1f} GB",
+        "free": f"{usage.free / (1024**3):.1f} GB",
+        "percent": (usage.used / usage.total) * 100
+    }
 
     data = get_file_info(target_dir, search)
     
@@ -159,7 +131,8 @@ async def index(request: Request, path: str = None, search: str = "", mode: str 
         "root_path": root_path,
         "search_query": search,
         "mode": "normal",
-        "breadcrumbs": parts
+        "breadcrumbs": parts,
+        "disk_info": disk_info
     })
 
 @app.get("/api/list")
@@ -175,6 +148,15 @@ async def api_list(path: str = None, search: str = "", show_hidden: bool = False
 
     data = get_file_info(target_dir, search, show_hidden)
     
+    # Get disk usage
+    usage = shutil.disk_usage(target_dir)
+    disk_info = {
+        "total": f"{usage.total / (1024**3):.1f} GB",
+        "used": f"{usage.used / (1024**3):.1f} GB",
+        "free": f"{usage.free / (1024**3):.1f} GB",
+        "percent": (usage.used / usage.total) * 100
+    }
+
     parts = []
     curr = target_dir
     while True:
@@ -188,8 +170,57 @@ async def api_list(path: str = None, search: str = "", show_hidden: bool = False
         "safe_path": quote(str(target_dir)),
         "folders": data["folders"],
         "files": data["files"],
-        "breadcrumbs": parts
+        "breadcrumbs": parts,
+        "disk_info": disk_info
     }
+
+@app.post("/copy")
+async def copy_item(path: str = Form(...), item_name: str = Form(...), dest_path: str = Form(...)):
+    src = Path(unquote(path)) / item_name
+    dest = Path(unquote(dest_path)) / item_name
+    try:
+        if src.is_dir():
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dest)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success"}
+
+@app.post("/move")
+async def move_item(path: str = Form(...), item_name: str = Form(...), dest_path: str = Form(...)):
+    src = Path(unquote(path)) / item_name
+    dest = Path(unquote(dest_path)) / item_name
+    try:
+        shutil.move(str(src), str(dest))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success"}
+
+@app.post("/zip")
+async def zip_item(path: str = Form(...), item_name: str = Form(...)):
+    src = Path(unquote(path)) / item_name
+    zip_path = src.with_suffix('.zip')
+    try:
+        if src.is_dir():
+            shutil.make_archive(str(src), 'zip', src)
+        else:
+            import zipfile
+            with zipfile.ZipFile(str(zip_path), 'w') as zipf:
+                zipf.write(src, arcname=src.name)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success"}
+
+@app.post("/unzip")
+async def unzip_item(path: str = Form(...), item_name: str = Form(...)):
+    src = Path(unquote(path)) / item_name
+    dest = src.parent / src.stem
+    try:
+        shutil.unpack_archive(src, dest)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success"}
 
 @app.get("/preview/{filepath:path}")
 async def preview_file(filepath: str):
@@ -207,7 +238,7 @@ async def preview_file(filepath: str):
     raise HTTPException(status_code=400, detail="Preview not supported for this file type")
 
 @app.post("/create-folder")
-async def create_folder(path: str, name: str):
+async def create_folder(path: str = Form(...), name: str = Form(...)):
     target_dir = Path(unquote(path)) / name
     try:
         target_dir.mkdir(exist_ok=False)
@@ -216,7 +247,7 @@ async def create_folder(path: str, name: str):
     return RedirectResponse(url=f"/?path={path}", status_code=303)
 
 @app.post("/create-file")
-async def create_file(path: str, name: str):
+async def create_file(path: str = Form(...), name: str = Form(...)):
     target_file = Path(unquote(path)) / name
     try:
         target_file.touch(exist_ok=False)
@@ -225,7 +256,7 @@ async def create_file(path: str, name: str):
     return RedirectResponse(url=f"/?path={path}", status_code=303)
 
 @app.post("/rename")
-async def rename_item(path: str, old_name: str, new_name: str):
+async def rename_item(path: str = Form(...), old_name: str = Form(...), new_name: str = Form(...)):
     base = Path(unquote(path))
     old_path = base / old_name
     new_path = base / new_name
@@ -254,6 +285,53 @@ async def download_file(filepath: str):
     if file_path.is_dir():
         raise HTTPException(status_code=400, detail="Cannot download a directory")
     return FileResponse(path=file_path, filename=file_path.name)
+
+@app.post("/api/batch-delete")
+async def batch_delete(path: str = Form(...), item_names: str = Form(...)):
+    parent_dir = Path(unquote(path)).resolve()
+    names = item_names.split(',')
+    for name in names:
+        target = parent_dir / name
+        try:
+            if target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+        except Exception as e:
+            continue
+    return {"status": "success"}
+
+@app.post("/api/batch-copy")
+async def batch_copy(path: str = Form(...), item_names: str = Form(...), dest_path: str = Form(...)):
+    src_dir = Path(unquote(path)).resolve()
+    dst_dir = Path(unquote(dest_path)).resolve()
+    names = item_names.split(',')
+    for name in names:
+        src = src_dir / name
+        dst = dst_dir / name
+        try:
+            if src.is_dir():
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dst)
+        except Exception as e:
+            continue
+    return {"status": "success"}
+
+@app.post("/api/batch-move")
+async def batch_move(path: str = Form(...), item_names: str = Form(...), dest_path: str = Form(...)):
+    src_dir = Path(unquote(path)).resolve()
+    dst_dir = Path(unquote(dest_path)).resolve()
+    names = item_names.split(',')
+    for name in names:
+        src = src_dir / name
+        dst = dst_dir / name
+        try:
+            shutil.move(str(src), str(dst))
+        except Exception as e:
+            continue
+    return {"status": "success"}
 
 @app.get("/delete/{filepath:path}")
 async def delete_file(filepath: str):
