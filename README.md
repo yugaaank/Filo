@@ -1,6 +1,6 @@
-# Liquid Commander
+# Filo
 
-Liquid Commander is a fast, visually rich local file manager built with FastAPI and Jinja2. The single-page interface in `templates/index.html` mirrors the feel of a desktop command center while the FastAPI-powered `server.py` (root directory) exposes navigation, file metadata, and filesystem actions through REST endpoints.
+Filo is a fast, visually rich local file manager built with FastAPI and Jinja2. The single-page interface in `templates/index.html` mirrors the feel of a desktop command center while the FastAPI-powered `server.py` (root directory) exposes navigation, file metadata, and filesystem actions through REST endpoints.
 
 ## Highlights
 - **Desktop-style explorer** powered by `templates/index.html` with a glassmorphism layout, breadcrumbs, batch actions, and optional trash view.
