@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Explorer</title>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --bg: #FAFAFA;
+            --sidebar-bg: #FFFFFF;
+            --glass-border: rgba(0, 0, 0, 0.05);
+            --text: #000000;
+            --dim: #888888;
+            --hover: rgba(0, 0, 0, 0.02);
+            --folder-color: #FFCC00;
+            --glass-front: rgba(255, 255, 255, 0.1);
+            --border-highlight: rgba(255, 255, 255, 0.8);
+        }
+
+        [data-theme="dark"] {
+            --bg: #000000;
+            --sidebar-bg: #0A0A0A;
+            --glass-border: rgba(255, 255, 255, 0.05);
+            --text: #FFFFFF;
+            --dim: #666666;
+            --hover: rgba(255, 255, 255, 0.05);
+            --glass-front: rgba(255, 255, 255, 0.05);
+            --border-highlight: rgba(255, 255, 255, 0.12);
+        }
+
+        * { box-sizing: border-box; font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, sans-serif; transition: background 0.3s, color 0.3s, transform 0.2s; }
+        
+        body { margin: 0; height: 100vh; background: var(--bg); color: var(--text); display: flex; overflow: hidden; padding: 20px; }
+
+        .sidebar { width: 240px; background: var(--sidebar-bg); border: 1px solid var(--glass-border); border-radius: 24px; display: flex; flex-direction: column; padding: 64px 12px 32px; flex-shrink: 0; margin-right: 20px; backdrop-filter: blur(40px); }
+        .window-controls { position: absolute; top: 40px; left: 40px; display: flex; gap: 8px; z-index: 100; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .red { background: #FF5F57; } .yellow { background: #FEBC2E; } .green { background: #28C840; }
+
+        .sidebar-section { margin-bottom: 40px; }
+        .sidebar-title { font-size: 10px; font-weight: 700; color: var(--dim); padding: 0 20px; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 1.5px; }
+        .sidebar-item { display: flex; align-items: center; gap: 12px; padding: 10px 20px; text-decoration: none; color: var(--text); font-size: 13px; border-radius: 12px; cursor: pointer; font-weight: 500; }
+        .sidebar-item:hover { background: var(--hover); }
+        .sidebar-item.active { background: var(--hover); font-weight: 600; border-left: 2px solid var(--folder-color); }
+
+        .explorer { flex: 1; display: flex; flex-direction: column; background: var(--sidebar-bg); border: 1px solid var(--glass-border); border-radius: 24px; overflow: hidden; position: relative; backdrop-filter: blur(40px); }
+        .top-bar { height: 72px; display: flex; align-items: center; padding: 0 40px; gap: 24px; border-bottom: 1px solid var(--glass-border); }
+        .breadcrumb-bar { padding: 12px 40px; border-bottom: 1px solid var(--glass-border); display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); font-weight: 500; min-height: 44px; }
+        .breadcrumb-bar span { cursor: pointer; }
+        .breadcrumb-bar span:hover { color: var(--text); text-decoration: underline; }
+
+        .pane-body { flex: 1; overflow-y: auto; padding: 32px; }
+
+        /* Grid View - Fix for stretching */
+        .body-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, 110px); 
+            gap: 56px; 
+            justify-content: start; 
+            align-content: start;
+        }
+        .body-list { display: flex; flex-direction: column; gap: 4px; }
+
+        /* Folder Card Sizing & Depth */
+        .folder-card { width: 110px; height: 95px; position: relative; cursor: pointer; display: flex; align-items: flex-end; transition: transform 0.2s cubic-bezier(0.2, 0, 0.2, 1); }
+        .folder-card:hover { transform: translateY(-4px); }
+        .f-back { position: absolute; top: 15%; left: 0; width: 100%; height: 85%; background: var(--folder-color); border-radius: 10px; z-index: 1; box-shadow: 0 4px 15px rgba(0,0,0,0.15); }
+        .f-tab { position: absolute; top: 0; left: 0; width: 45%; height: 25%; background: var(--folder-color); border-top-left-radius: 6px; border-top-right-radius: 6px; z-index: 1; }
+        .f-front { 
+            position: relative; width: 100%; height: 75%; 
+            background: var(--glass-front); 
+            backdrop-filter: blur(20px) saturate(150%); 
+            border: 1px solid var(--border-highlight); 
+            border-radius: 10px; z-index: 2; 
+            display: flex; flex-direction: column; justify-content: flex-end; padding: 8px; 
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.3), 0 6px 20px rgba(0,0,0,0.2); 
+        }
+        .f-name { font-size: 10px; font-weight: 800; color: #FFFFFF; margin-bottom: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+        .f-meta { font-size: 7px; font-weight: 700; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.5px; }
+
+        /* File Card Sizing */
+        .file-card { width: 110px; height: 95px; position: relative; cursor: pointer; display: flex; align-items: flex-end; transition: transform 0.2s; }
+        .file-card:hover { transform: translateY(-4px); }
+        .fi-back { position: absolute; top: 5%; left: 15%; width: 70%; height: 95%; background: #E5E5E5; border-radius: 8px; z-index: 1; border: 1px solid rgba(0,0,0,0.05); }
+        [data-theme="dark"] .fi-back { background: #1A1A1A; border-color: rgba(255,255,255,0.05); }
+        .fi-front { position: relative; width: 100%; height: 80%; background: var(--glass-front); backdrop-filter: blur(15px); border: 1px solid var(--border-highlight); border-radius: 10px; z-index: 2; display: flex; flex-direction: column; justify-content: flex-end; padding: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.2); }
+        .fi-icon { position: absolute; top: 8px; right: 8px; color: var(--dim); }
+        .fi-icon i { width: 16px !important; height: 16px !important; }
+
+        /* List View Items */
+        .entry-list { display: flex; align-items: center; gap: 16px; padding: 10px 16px; font-size: 14px; cursor: pointer; border-radius: 10px; color: var(--text); text-decoration: none; border-bottom: 1px solid var(--glass-border); }
+        .entry-list:hover { background: var(--hover); }
+        .mini-f { width: 22px; height: 18px; border-radius: 4px; background: var(--folder-color); position: relative; flex-shrink: 0; }
+        .mini-f-front { position: absolute; bottom: 0; width: 100%; height: 60%; background: rgba(255,255,255,0.2); border-radius: 0 0 4px 4px; border-top: 1px solid rgba(255,255,255,0.3); }
+
+        /* Controls */
+        .action-bar { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); background: var(--sidebar-bg); backdrop-filter: blur(20px); border: 1px solid var(--glass-border); padding: 12px 32px; border-radius: 24px; display: flex; gap: 32px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); z-index: 200; }
+        .tool-btn { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; cursor: pointer; letter-spacing: 0.5px; opacity: 0.7; text-transform: uppercase; color: var(--text); }
+        .tool-btn:hover { opacity: 1; color: var(--folder-color); }
+
+        .btn-toggle { padding: 8px 16px; border-radius: 14px; font-size: 11px; font-weight: 700; cursor: pointer; border: 1px solid var(--glass-border); background: rgba(255, 255, 255, 0.05); color: var(--dim); display: flex; align-items: center; gap: 8px; }
+        .btn-toggle.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+        .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(50px); z-index: 1000; align-items: center; justify-content: center; }
+        .overlay-content { width: 90%; height: 90%; background: var(--bg); border-radius: 32px; border: 1px solid var(--glass-border); display: flex; flex-direction: column; overflow: hidden; }
+        ::-webkit-scrollbar { width: 0px; }
+
+        /* Context Menu */
+        .context-menu {
+            position: fixed;
+            background: var(--sidebar-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            padding: 8px;
+            z-index: 2000;
+            display: none;
+            min-width: 200px;
+            backdrop-filter: blur(30px) saturate(150%);
+        }
+        .context-menu-item {
+            padding: 10px 14px;
+            font-size: 13px;
+            cursor: pointer;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text);
+            font-weight: 500;
+        }
+        .context-menu-item:hover {
+            background: var(--hover);
+        }
+        .context-menu-item i {
+            opacity: 0.6;
+        }
+        .context-menu-separator {
+            height: 1px;
+            background: var(--glass-border);
+            margin: 6px 4px;
+        }
+    </style>
+</head>
+<body data-theme="dark">
+    <div id="context-menu" class="context-menu"></div>
+    <div class="window-controls">
+        <div class="dot red" onclick="location.href='/'"></div>
+        <div class="dot yellow" onclick="toggleTheme()"></div>
+        <div class="dot green" onclick="toggleFullscreen()"></div>
+    </div>
+
+    <div class="sidebar">
+        <div class="sidebar-section">
+            <div class="sidebar-title">Personal</div>
+            <div class="sidebar-item active" onclick="loadPane('{{ home_path }}')"><i data-lucide="home" size="16"></i> Home</div>
+            <div class="sidebar-item" onclick="loadPane('{{ home_path }}/Desktop')"><i data-lucide="monitor" size="16"></i> Desktop</div>
+            <div class="sidebar-item" onclick="loadPane('{{ home_path }}/Documents')"><i data-lucide="file-text" size="16"></i> Documents</div>
+            <div class="sidebar-item" onclick="loadPane('{{ home_path }}/Downloads')"><i data-lucide="download" size="16"></i> Downloads</div>
+            <div class="sidebar-item" onclick="loadPane('{{ home_path }}/Pictures')"><i data-lucide="image" size="16"></i> Images</div>
+            <div class="sidebar-item" onclick="loadPane('{{ home_path }}/Videos')"><i data-lucide="video" size="16"></i> Videos</div>
+        </div>
+        <div class="sidebar-section"><div class="sidebar-title">System</div><div class="sidebar-item" onclick="loadPane('/')"><i data-lucide="hard-drive" size="16"></i> {{ device_name }}</div></div>
+        <div class="sidebar-section" style="margin-top: auto;"><div class="sidebar-item" onclick="toggleTheme()"><i data-lucide="sun" id="theme-icon" size="16"></i> Appearance</div></div>
+    </div>
+
+    <div class="explorer">
+        <div class="top-bar">
+            <div style="display: flex; gap: 24px; color: var(--dim);">
+                <i data-lucide="chevron-left" size="20" style="cursor:pointer;" onclick="window.history.back()"></i>
+                <i data-lucide="chevron-right" size="20" style="cursor:pointer;" onclick="window.history.forward()"></i>
+            </div>
+            <div style="flex: 1; text-align: center; font-size: 11px; font-weight: 800; color: var(--text); letter-spacing: 2px; text-transform: uppercase; opacity: 0.2;">Liquid Commander</div>
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <div class="btn-toggle" id="hiddenToggle" onclick="toggleHidden()"><i data-lucide="eye-off" id="hidden-icon" size="14"></i> Hidden</div>
+                <div class="btn-toggle active" id="viewToggle" onclick="toggleViewMode()"><i data-lucide="layout-grid" id="view-icon" size="14"></i> <span id="view-text">Grid</span></div>
+                <i data-lucide="search" size="18" style="color: var(--dim); cursor:pointer;"></i>
+            </div>
+        </div>
+        <div class="breadcrumb-bar" id="bc-0"></div>
+        <div class="pane-body body-grid" id="body-0"></div>
+        <div class="action-bar">
+            <div class="tool-btn" onclick="showPrompt('folder')"><i data-lucide="folder-plus" size="16"></i> Folder</div>
+            <div class="tool-btn" onclick="showPrompt('file')"><i data-lucide="file-plus" size="16"></i> File</div>
+            <div class="tool-btn" onclick="document.getElementById('file-upload').click()"><i data-lucide="upload" size="16"></i> Upload</div>
+        </div>
+    </div>
+
+    <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data" style="display:none"><input type="hidden" name="path" id="upload-path"><input type="file" name="file" id="file-upload" onchange="handleUpload()"></form>
+    <div id="overlay" class="overlay" onclick="if(event.target==this) this.style.display='none'"><div class="overlay-content"><div id="overlay-body" style="flex:1; display:flex; align-items:center; justify-content:center; overflow:auto;"></div></div></div>
+
+    <script>
+        lucide.createIcons();
+        let currentPath = "{{ home_path }}", viewMode = 'grid', showHidden = false;
+        function toggleTheme() { const body = document.body; const isDark = body.getAttribute('data-theme') === 'dark'; body.setAttribute('data-theme', isDark ? 'light' : 'dark'); document.getElementById('theme-icon').setAttribute('data-lucide', isDark ? 'moon' : 'sun'); lucide.createIcons(); }
+        function toggleViewMode() { viewMode = viewMode === 'list' ? 'grid' : 'list'; document.getElementById('view-text').innerText = viewMode.charAt(0).toUpperCase() + viewMode.slice(1); document.getElementById('view-icon').setAttribute('data-lucide', viewMode === 'list' ? 'layout-grid' : 'list'); document.getElementById('viewToggle').classList.toggle('active', viewMode === 'grid'); loadPane(); }
+        function toggleHidden() { showHidden = !showHidden; const btn = document.getElementById('hiddenToggle'); const icon = document.getElementById('hidden-icon'); btn.classList.toggle('active', showHidden); icon.setAttribute('data-lucide', showHidden ? 'eye' : 'eye-off'); lucide.createIcons(); loadPane(); }
+        function toggleFullscreen() { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); }
+        async function loadPane(path) {
+            if (!path) path = currentPath;
+            const resp = await fetch(`/api/list?path=${encodeURIComponent(path)}&show_hidden=${showHidden}`);
+            const data = await resp.json();
+            currentPath = data.path;
+            document.getElementById('bc-0').innerHTML = data.breadcrumbs.map(b => `<span onclick="loadPane('${b.path.replace(/\\/g, '\\\\')}')">${b.name}</span>`).join(' <i data-lucide="chevron-right" size="10" style="opacity:0.3"></i> ');
+            const body = document.getElementById(`body-0`);
+            body.className = `pane-body body-${viewMode}`;
+            body.innerHTML = '';
+            data.folders.forEach(f => {
+                const el = document.createElement('div');
+                if (viewMode === 'grid') {
+                    el.className = 'folder-card'; el.onclick = () => loadPane(f.rel_path);
+                    el.oncontextmenu = (e) => showContextMenu(e, 'folder', f);
+                    el.innerHTML = `<div class="f-tab"></div><div class="f-back"></div><div class="f-front"><div class="f-name">${f.name}</div><div class="f-meta">${f.item_count} Items</div></div>`;
+                } else {
+                    el.className = 'entry-list'; el.onclick = () => loadPane(f.rel_path);
+                    el.oncontextmenu = (e) => showContextMenu(e, 'folder', f);
+                    el.innerHTML = `<div class="mini-f"><div class="mini-f-front"></div></div><span>${f.name}</span>`;
+                }
+                body.appendChild(el);
+            });
+            data.files.forEach(f => {
+                const el = document.createElement('div');
+                if (viewMode === 'grid') {
+                    el.className = 'file-card'; el.onclick = () => previewFile(f.rel_path, f.name, f.type);
+                    el.oncontextmenu = (e) => showContextMenu(e, 'file', f);
+                    el.innerHTML = `<div class="fi-back"></div><div class="fi-front"><div class="fi-icon"><i data-lucide="file" size="18"></i></div><div class="f-name" style="color:var(--text); text-shadow:none;">${f.name}</div><div class="f-meta">${f.size}</div></div>`;
+                } else {
+                    el.className = 'entry-list'; el.onclick = () => previewFile(f.rel_path, f.name, f.type);
+                    el.oncontextmenu = (e) => showContextMenu(e, 'file', f);
+                    el.innerHTML = `<i data-lucide="file" size="18" style="opacity:0.5; flex-shrink:0;"></i><span>${f.name}</span>`;
+                }
+                body.appendChild(el);
+            });
+            lucide.createIcons();
+        }
+        async function previewFile(path, name, type) { const overlay = document.getElementById('overlay'); const body = document.getElementById('overlay-body'); overlay.style.display = 'flex'; body.innerHTML = 'Loading...'; if (type === 'image') body.innerHTML = `<img src="/preview/${encodeURIComponent(path)}" style="max-width:90%; max-height:90%; object-fit:contain; border-radius:24px;">`; else { const text = await (await fetch(`/preview/${encodeURIComponent(path)}`)).text(); body.innerHTML = `<textarea style="width:100%; height:100%; border:none; padding:64px; font-family:'SF Mono', monospace; font-size:13px; outline:none; background:transparent; color:inherit; resize:none; line-height:1.6;" readonly>${text}</textarea>`; } }
+        function showPrompt(type) { const name = prompt(`Enter ${type} name:`); if (name) { const form = document.createElement('form'); form.method = 'POST'; form.action = type === 'folder' ? '/create-folder' : '/create-file'; form.innerHTML = `<input type="hidden" name="path" value="${encodeURIComponent(currentPath)}"><input type="hidden" name="name" value="${name}">`; document.body.appendChild(form); form.submit(); } }
+        function handleUpload() { document.getElementById('upload-path').value = currentPath; document.getElementById('upload-form').submit(); }
+
+        // Context Menu Logic
+        const ctxMenu = document.getElementById('context-menu');
+        let ctxTarget = null;
+
+        document.addEventListener('click', () => ctxMenu.style.display = 'none');
+        document.addEventListener('contextmenu', (e) => {
+            if (!e.target.closest('.explorer')) {
+                ctxMenu.style.display = 'none';
+            }
+        });
+
+        function showContextMenu(e, type, data) {
+            e.preventDefault();
+            e.stopPropagation();
+            ctxTarget = data;
+            
+            let menuHtml = '';
+            if (type === 'folder') {
+                menuHtml = `
+                    <div class="context-menu-item" onclick="loadPane('${data.rel_path.replace(/\\/g, '\\\\')}')"><i data-lucide="folder-open" size="16"></i> Open</div>
+                    <div class="context-menu-item" onclick="copyToClipboard('${data.rel_path.replace(/\\/g, '\\\\')}')"><i data-lucide="copy" size="16"></i> Copy Path</div>
+                    <div class="context-menu-separator"></div>
+                    <div class="context-menu-item" onclick="renameItem('${data.name}')"><i data-lucide="edit-3" size="16"></i> Rename</div>
+                    <div class="context-menu-item" onclick="deleteItem('${data.rel_path.replace(/\\/g, '\\\\')}')" style="color: #ff5f57;"><i data-lucide="trash-2" size="16"></i> Delete</div>
+                `;
+            } else if (type === 'file') {
+                menuHtml = `
+                    <div class="context-menu-item" onclick="previewFile('${data.rel_path.replace(/\\/g, '\\\\')}', '${data.name}', '${data.type}')"><i data-lucide="eye" size="16"></i> Preview</div>
+                    <div class="context-menu-item" onclick="location.href='/download/${encodeURIComponent(data.rel_path)}'"><i data-lucide="download" size="16"></i> Download</div>
+                    <div class="context-menu-item" onclick="copyToClipboard('${data.rel_path.replace(/\\/g, '\\\\')}')"><i data-lucide="copy" size="16"></i> Copy Path</div>
+                    <div class="context-menu-separator"></div>
+                    <div class="context-menu-item" onclick="renameItem('${data.name}')"><i data-lucide="edit-3" size="16"></i> Rename</div>
+                    <div class="context-menu-item" onclick="deleteItem('${data.rel_path.replace(/\\/g, '\\\\')}')" style="color: #ff5f57;"><i data-lucide="trash-2" size="16"></i> Delete</div>
+                `;
+            } else {
+                menuHtml = `
+                    <div class="context-menu-item" onclick="loadPane()"><i data-lucide="refresh-cw" size="16"></i> Refresh</div>
+                    <div class="context-menu-separator"></div>
+                    <div class="context-menu-item" onclick="showPrompt('folder')"><i data-lucide="folder-plus" size="16"></i> New Folder</div>
+                    <div class="context-menu-item" onclick="showPrompt('file')"><i data-lucide="file-plus" size="16"></i> New File</div>
+                    <div class="context-menu-separator"></div>
+                    <div class="context-menu-item" onclick="document.getElementById('file-upload').click()"><i data-lucide="upload" size="16"></i> Upload</div>
+                    <div class="context-menu-separator"></div>
+                    <div class="context-menu-item" onclick="copyToClipboard('${currentPath.replace(/\\/g, '\\\\')}')"><i data-lucide="copy" size="16"></i> Copy Current Path</div>
+                `;
+            }
+
+            ctxMenu.innerHTML = menuHtml;
+            lucide.createIcons();
+            
+            ctxMenu.style.display = 'block';
+            
+            // Adjust position to prevent overflow
+            let x = e.clientX;
+            let y = e.clientY;
+            
+            if (x + ctxMenu.offsetWidth > window.innerWidth) x -= ctxMenu.offsetWidth;
+            if (y + ctxMenu.offsetHeight > window.innerHeight) y -= ctxMenu.offsetHeight;
+            
+            ctxMenu.style.left = `${x}px`;
+            ctxMenu.style.top = `${y}px`;
+        }
+
+        function deleteItem(path) {
+            if (confirm(`Are you sure you want to delete this?`)) {
+                location.href = `/delete/${encodeURIComponent(path)}`;
+            }
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Copied to clipboard!');
+            });
+        }
+
+        function renameItem(oldName) {
+            const newName = prompt('Enter new name:', oldName);
+            if (newName && newName !== oldName) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/rename';
+                form.innerHTML = `
+                    <input type="hidden" name="path" value="${encodeURIComponent(currentPath)}">
+                    <input type="hidden" name="old_name" value="${oldName}">
+                    <input type="hidden" name="new_name" value="${newName}">
+                `;
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+
+        document.getElementById('body-0').addEventListener('contextmenu', (e) => {
+            if (e.target === document.getElementById('body-0')) {
+                showContextMenu(e, 'bg');
+            }
+        });
+
+        loadPane();
+    </script>
+</body>
+</html>
