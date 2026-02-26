@@ -1,10 +1,11 @@
 import os
 import shutil
 from pathlib import Path
-from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Form, Depends
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
 from datetime import datetime
 import mimetypes
@@ -14,6 +15,26 @@ import platform
 import socket
 
 app = FastAPI()
+
+# Hardcoded credentials
+USERNAME = "khushi"
+PASSWORD = "zupzup"
+
+def is_authenticated(request: Request):
+    return request.session.get("authenticated", False)
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if request.url.path in ["/login", "/logout"] or request.url.path.startswith("/static"):
+        return await call_next(request)
+    
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login")
+    
+    response = await call_next(request)
+    return response
+
+app.add_middleware(SessionMiddleware, secret_key="super-secret-key-change-this-in-production")
 
 # Configuration: Serve files from the root of the filesystem
 BASE_DIR = Path("/").resolve()
@@ -123,6 +144,24 @@ def get_file_info(current_dir: Path, search_query: str = "", show_hidden: bool =
         pass
             
     return {"folders": folders, "files": files}
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_get(request: Request):
+    if is_authenticated(request):
+        return RedirectResponse(url="/")
+    return templates.TemplateResponse("login.html", {"request": request})
+
+@app.post("/login")
+async def login_post(request: Request, username: str = Form(...), password: str = Form(...)):
+    if username == USERNAME and password == PASSWORD:
+        request.session["authenticated"] = True
+        return RedirectResponse(url="/", status_code=303)
+    return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
+
+@app.get("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/login")
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, path: str = None, search: str = "", mode: str = "normal"):
